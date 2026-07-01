@@ -1,7 +1,10 @@
-from flask import Flask, request, jsonify
-import subprocess, os, requests, tempfile, uuid, threading
+from flask import Flask, request, jsonify, send_file
+import subprocess, os, requests, tempfile, uuid
+import imageio_ffmpeg
 
 app = Flask(__name__)
+
+FFMPEG = imageio_ffmpeg.get_ffmpeg_exe()
 
 def download_file(url, suffix):
     r = requests.get(url)
@@ -23,15 +26,15 @@ def render():
     for i, scene in enumerate(scenes):
         img_path = download_file(scene['image_url'], '.jpg')
         audio_path = download_file(scene['audio_url'], '.mp3')
-        text = scene['text']
+        text = scene['text'].replace("'", "\\'")
         out = f'/tmp/scene_{i}.mp4'
         
         cmd = [
-            'ffmpeg', '-y',
+            FFMPEG, '-y',
             '-loop', '1', '-i', img_path,
             '-i', audio_path,
-            '-vf', f"scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,zoompan=z='min(zoom+0.001,1.1)':d=1:s=1080x1920,drawtext=text='{text}':fontcolor=white:fontsize=50:x=(w-text_w)/2:y=(h-text_h)/2:shadowcolor=black:shadowx=2:shadowy=2,drawtext=text='{channel_name}':fontcolor=white:fontsize=30:x=(w-text_w)/2:y=h-80:shadowcolor=black:shadowx=2:shadowy=2,colorchannelmixer=.393:.769:.189:0:.349:.686:.168:0:.272:.534:.131",
-            '-shortest', '-c:v', 'libx264', '-c:a', 'aac',
+            '-vf', f"scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,drawtext=text='{text}':fontcolor=white:fontsize=45:x=(w-text_w)/2:y=(h-text_h)/2:shadowcolor=black:shadowx=2:shadowy=2,drawtext=text='{channel_name}':fontcolor=white:fontsize=28:x=(w-text_w)/2:y=h-70:shadowcolor=black:shadowx=2:shadowy=2",
+            '-shortest', '-c:v', 'libx264', '-c:a', 'aac', '-pix_fmt', 'yuv420p',
             out
         ]
         subprocess.run(cmd, check=True)
@@ -45,11 +48,11 @@ def render():
             f.write(f"file '{v}'\n")
     
     concat_out = '/tmp/concat.mp4'
-    subprocess.run(['ffmpeg', '-y', '-f', 'concat', '-safe', '0', '-i', list_file, '-c', 'copy', concat_out], check=True)
+    subprocess.run([FFMPEG, '-y', '-f', 'concat', '-safe', '0', '-i', list_file, '-c', 'copy', concat_out], check=True)
     
     final_out = f'/tmp/final_{uuid.uuid4().hex}.mp4'
     subprocess.run([
-        'ffmpeg', '-y', '-i', concat_out, '-i', music_path,
+        FFMPEG, '-y', '-i', concat_out, '-i', music_path,
         '-filter_complex', '[0:a][1:a]amix=inputs=2:weights=1 0.15[a]',
         '-map', '0:v', '-map', '[a]',
         '-c:v', 'copy', '-c:a', 'aac', '-shortest',
@@ -58,12 +61,7 @@ def render():
     
     os.unlink(music_path)
     
-    with open(final_out, 'rb') as f:
-        video_data = f.read()
-    
-    os.unlink(final_out)
-    
-    return jsonify({'status': 'done', 'size': len(video_data)}), 200
+    return send_file(final_out, mimetype='video/mp4', as_attachment=True, download_name='reel.mp4')
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)
