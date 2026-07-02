@@ -5,6 +5,9 @@ from PIL import Image, ImageDraw, ImageFont
 import textwrap
 
 app = Flask(__name__)
+@app.route('/health', methods=['GET'])
+def health():
+    return {'status': 'alive'}, 200
 FFMPEG = imageio_ffmpeg.get_ffmpeg_exe()
 
 # خط افتراضي متوفر على أغلب أنظمة لينكس (Render يستخدم Debian)
