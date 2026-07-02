@@ -1,13 +1,15 @@
 from flask import Flask, request, jsonify, send_file
 import subprocess, os, requests, tempfile, uuid, traceback
-import imageio_ffmpeg
+import shutil
 
 app = Flask(__name__)
 @app.route('/health', methods=['GET'])
 def health():
     return {'status': 'alive'}, 200
 
-FFMPEG = imageio_ffmpeg.get_ffmpeg_exe()
+# نستخدم ffmpeg الكامل المثبت عن طريق apt-get (فيه دعم drawtext وباقي الفلاتر)
+# بدل imageio_ffmpeg اللي بينزل نسخة static مبسطة ممكن يكون ناقصها فلاتر
+FFMPEG = shutil.which('ffmpeg') or '/usr/bin/ffmpeg'
 
 def download_file(url, suffix):
     r = requests.get(url, timeout=30)
@@ -15,6 +17,19 @@ def download_file(url, suffix):
     tmp.write(r.content)
     tmp.close()
     return tmp.name
+
+# خط افتراضي متوفر على أغلب أنظمة لينكس (Render يستخدم Debian)
+# لو عايزين خط عربي أو خط مخصص، حطوه في الريبو وحدثوا المسار هنا
+DEFAULT_FONT_PATHS = [
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+]
+
+def get_font_path():
+    for p in DEFAULT_FONT_PATHS:
+        if os.path.exists(p):
+            return p
+    return None
 
 @app.route('/render', methods=['POST'])
 def render():
@@ -33,12 +48,15 @@ def render():
             text = scene['text'].replace("'", "").replace('"', '')
             out = f'/tmp/scene_{i}.mp4'
 
+            font_path = get_font_path()
+            font_arg = f":fontfile='{font_path}'" if font_path else ""
+
             # تم تقليل الدقة من 1080x1920 إلى 720x1280 لتقليل استهلاك الرام
             cmd = [
                 FFMPEG, '-y',
                 '-loop', '1', '-i', img_path,
                 '-i', audio_path,
-                '-vf', f"scale=720:1280:force_original_aspect_ratio=increase,crop=720:1280,drawtext=text='{text}':fontcolor=white:fontsize=32:x=(w-text_w)/2:y=(h-text_h)/2:shadowcolor=black:shadowx=2:shadowy=2,drawtext=text='{channel_name}':fontcolor=white:fontsize=20:x=(w-text_w)/2:y=h-50:shadowcolor=black:shadowx=2:shadowy=2",
+                '-vf', f"scale=720:1280:force_original_aspect_ratio=increase,crop=720:1280,drawtext=text='{text}'{font_arg}:fontcolor=white:fontsize=32:x=(w-text_w)/2:y=(h-text_h)/2:shadowcolor=black:shadowx=2:shadowy=2,drawtext=text='{channel_name}'{font_arg}:fontcolor=white:fontsize=20:x=(w-text_w)/2:y=h-50:shadowcolor=black:shadowx=2:shadowy=2",
                 '-shortest',
                 '-c:v', 'libx264',
                 '-preset', 'veryfast',   # تقليل استهلاك الرام والمعالجة أثناء الـ encoding
