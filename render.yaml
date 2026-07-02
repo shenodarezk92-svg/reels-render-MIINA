@@ -3,5 +3,5 @@ services:
     name: reels-render-MIINA
     env: python
     buildCommand: pip install -r requirements.txt && apt-get install -y ffmpeg
-    startCommand: gunicorn app:app
+    startCommand: gunicorn app:app --timeout 300
     plan: free
